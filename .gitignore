@@ -1,0 +1,6 @@
+/build/
+/dist/
+/.vs/
+*.user
+/assets/icon_preview.png
+__pycache__/
