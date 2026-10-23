@@ -14,7 +14,7 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Read version
         id: version
@@ -56,7 +56,7 @@ jobs:
           Copy-Item build\Release\ofwm.exe, docs\README.md "dist\$name"
           Compress-Archive -Path "dist\$name\*" -DestinationPath "dist\$name.zip" -Force
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: ObjectFrame-${{ steps.version.outputs.version }}
           path: |
@@ -65,7 +65,7 @@ jobs:
 
       - name: Publish release
         if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: ObjectFrame ${{ steps.version.outputs.version }}
           files: |
