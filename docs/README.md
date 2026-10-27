@@ -4,9 +4,11 @@ ObjectFrame は Windows 10 / 11 向けのタイル型ウィンドウマネージ
 開いたウィンドウを自動で画面いっぱいに並べ、キーボードだけでフォーカス移動・配置換え・ワークスペース切り替えができます。
 
 - C++20 / Win32 API のみで書かれた単体の `ofwm.exe`(ランタイム不要)
-- 設定はファイル (`ofwm.conf`) と GUI の設定画面の両方から編集可能
+- 設定はファイル (`ofwm.conf`) を編集して行う
 - 4 種類のレイアウト、ワークスペース、マルチモニター対応
 - 角丸のフォーカス枠とグロー、移動・切り替えのアニメーション
+- 画面上部のノッチ型ステータス表示・タスクバー代わりの [ObjectPulse](https://github.com/Object-Works/ObjectPulse) と連携
+- キーボードランチャー [ObjectArc](https://github.com/Object-Works/ObjectArc) からワークスペースやレイアウトを操作
 
 ---
 
@@ -19,12 +21,11 @@ ObjectFrame は Windows 10 / 11 向けのタイル型ウィンドウマネージ
 5. [レイアウト](#レイアウト)
 6. [ワークスペースとモニター](#ワークスペースとモニター)
 7. [見た目 (枠・グロー・アニメーション)](#見た目-枠グローアニメーション)
-8. [設定画面](#設定画面)
-9. [設定ファイル](#設定ファイル)
-10. [コマンド一覧](#コマンド一覧)
-11. [コマンドラインから操作する](#コマンドラインから操作する)
-12. [ファイルの場所](#ファイルの場所)
-13. [注意点・制限](#注意点制限)
+8. [設定ファイル](#設定ファイル)
+9. [コマンド一覧](#コマンド一覧)
+10. [コマンドラインから操作する](#コマンドラインから操作する)
+11. [ファイルの場所](#ファイルの場所)
+12. [注意点・制限](#注意点制限)
 
 ---
 
@@ -53,15 +54,15 @@ GitHub Actions ([.github/workflows/build.yml](../.github/workflows/build.yml)) �
 バージョンはリポジトリ直下の `VERSION` ファイルで管理しています。リリースするときは `VERSION` を更新して、同じ番号のタグを push します。
 
 ```powershell
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 タグを push すると、GitHub の Releases にインストーラーと zip が公開されます。
 ローカルでインストーラーを作る場合は Inno Setup 6 を入れて次を実行します。
 
 ```powershell
-& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=0.1.0 installer\ObjectFrame.iss
+& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=0.1.1 installer\ObjectFrame.iss
 ```
 
 ---
@@ -71,10 +72,11 @@ git push origin v0.1.0
 | 操作 | 方法 |
 | --- | --- |
 | 起動 | `ofwm.exe` を実行 (タスクトレイにアイコンが出ます) |
-| 設定画面を開く | `Win + F1`、またはトレイアイコンをダブルクリック |
+| 設定ファイルを開く | トレイアイコンをダブルクリック、またはトレイメニューの「設定ファイルを開く」 |
+| 設定を再読み込み | `Win + Shift + R`、またはトレイメニューの「設定を再読み込み」 |
 | 一時停止 / 再開 | `Win + Shift + P` |
 | 終了 | `Win + Shift + E`、またはトレイメニューの「終了」 |
-| サインイン時に自動起動 | 設定画面の「起動」→「Windows へのサインイン時に ObjectFrame を起動する」 |
+| サインイン時に自動起動 | インストーラーの「Windows へのサインイン時に ObjectFrame を起動する」 |
 
 終了・一時停止すると、隠していたウィンドウはすべて元に戻ります。
 異常終了した場合も、次回起動時に前回隠したままのウィンドウを復元します。
@@ -93,7 +95,7 @@ git push origin v0.1.0
 
 ## 既定のキーバインド
 
-`$mod` は既定で **Windows キー** です (設定画面の「メインモディファイア」で変更できます)。
+`$mod` は既定で **Windows キー** です (`ofwm.conf` の `$mod` で変更できます)。
 
 ### ウィンドウ
 
@@ -131,7 +133,6 @@ git push origin v0.1.0
 
 | キー | 動作 |
 | --- | --- |
-| `$mod + F1` | 設定画面 |
 | `$mod + Shift + R` | 設定を再読み込み |
 | `$mod + Shift + P` | 一時停止 / 再開 |
 | `$mod + Shift + E` | 終了 |
@@ -150,7 +151,7 @@ git push origin v0.1.0
 | `monocle` | すべてのウィンドウを全画面で重ねます。 |
 | `scroll` | ウィンドウを横一列の列として並べ、フォーカスに合わせて横にスクロールします。列が画面に収まるうちは画面幅を等分し、収まらなくなると `column_width` の幅で並べます。画面外の列は隣のモニターに映りません。 |
 
-レイアウトはワークスペースごとに持ちます。設定の「デフォルトのレイアウト」を変えて保存すると、開いているすべてのワークスペースに反映されます。
+レイアウトはワークスペースごとに持ちます。`default_layout` を変えて再読み込みすると、開いているすべてのワークスペースに反映されます。
 
 ---
 
@@ -182,7 +183,7 @@ git push origin v0.1.0
 | 設定 | 内容 |
 | --- | --- |
 | `border` / `border_width` | フォーカス枠の表示と太さ。0 にすると Windows 11 標準の 1px 枠に色を付けるだけになります。 |
-| `border_radius` | 枠の角丸の半径 (0〜30px)。ウィンドウ自体の角は 0 / 4 / 8px の近いものに揃えます。 |
+| `border_radius` | 角丸の半径 (0〜30px)。角が丸いウィンドウでは枠もその半径に沿います。直角のウィンドウでは枠も直角で、角を覆いません。最大化中は枠を出しません。 |
 | `border_active` / `border_inactive` | アクティブ / 非アクティブ枠の色 (`0xRRGGBB`)。 |
 | `glow` / `glow_size` / `glow_intensity` | アクティブなウィンドウの枠の周りを枠の色で光らせます。 |
 | `animate_move` | タイル配置が変わったときにウィンドウを滑らかに移動します。 |
@@ -198,26 +199,11 @@ git push origin v0.1.0
 
 ---
 
-## 設定画面
-
-`$mod + F1` またはトレイアイコンのダブルクリックで開きます。「保存して適用」を押すと設定ファイルに書き込まれ、すぐに反映されます (ワークスペース数のみ再起動後に反映)。
-
-| ページ | 内容 |
-| --- | --- |
-| 一般 | メインモディファイア、デフォルトのレイアウト、隙間、比率、列幅、ワークスペース数と割り当て方式 |
-| 動作 | マウスによるフォーカス、カーソルの追従、アニメーションの有無・長さ・スライド方向 |
-| 枠とグロー | 枠の太さ・角丸・色、グローの広がり・明るさ (右側にプレビュー) |
-| キーバインド | キーの追加・変更・削除、既定に戻す。「アプリを選択...」で exe やショートカットを選ぶと、そのアプリを起動するキーを作れます |
-| ウィンドウルール | フローティング / 管理しない / 強制タイル のルール。「開いている窓から」で実行中のウィンドウから条件を作れます |
-| 起動 | ObjectFrame 起動時に実行するコマンド、サインイン時の自動起動 |
-
-左下の「設定ファイルを開く」でメモ帳を使って `ofwm.conf` を直接編集できます。
-
----
-
 ## 設定ファイル
 
 場所: `%USERPROFILE%\.config\ofwm\ofwm.conf` (初回起動時に既定の内容で作られます)
+
+[ObjectManager](https://github.com/Object-Works/ObjectManager) から、枠線・余白・アニメーション・ワークスペースの項目を編集できます。キーバインドとウィンドウルールは、このファイルで編集します。
 
 ```ini
 # key = value 形式。'#' 以降はコメント
@@ -291,7 +277,7 @@ windowrule = float|ignore|tile, class:|exe:|title:<正規表現>
 | `retile` | | 再タイル |
 | `pause` | | 一時停止 / 再開 |
 | `reload` | | 設定を再読み込み |
-| `settings` | | 設定画面を開く |
+| `pulse` | | ObjectPulse に現在の状態を送り直す (通常は自動) |
 | `quit` | | 終了 |
 
 ---
@@ -304,9 +290,28 @@ windowrule = float|ignore|tile, class:|exe:|title:<正規表現>
 ofwm.exe dispatch workspace 3
 ofwm.exe dispatch layout scroll
 ofwm.exe dispatch quit
-ofwm.exe settings                 # 設定画面を開く
+ofwm.exe dispatch reload          # ofwm.conf の変更を反映
 ofwm.exe --config D:\my\ofwm.conf # 別の設定ファイルで起動
 ofwm.exe --help
+```
+
+### ObjectPulse との連携
+
+[ObjectPulse](https://github.com/Object-Works/ObjectPulse) を起動しておくと、ObjectFrame はワークスペース・レイアウト・フォーカス中のウィンドウなどが変わるたびに状態を送ります。
+ObjectPulse は画面上部に現在の状態を表示します。ワークスペースの切り替えや、マウスが別のモニターへ移ったときには案内は出しません。ObjectPulse が起動していなければ何もしません。
+
+ObjectFrame と一緒に起動するには `ofwm.conf` に次を書きます。
+
+```ini
+exec-once = "C:\Tools\ObjectPulse\ObjectPulse.exe"
+```
+
+### ObjectArc との連携
+
+キーボードランチャーの [ObjectArc](https://github.com/Object-Works/ObjectArc) からは、ワークスペース・レイアウトの切り替えや再タイルなどを、`ofwm dispatch` と同じコマンドで実行できます。
+
+```ini
+exec-once = "C:\Tools\ObjectArc\ObjectArc.exe"
 ```
 
 ---
@@ -327,4 +332,4 @@ ofwm.exe --help
 
 - **管理者権限のウィンドウ**: ObjectFrame を通常権限で起動している場合、管理者として実行中のアプリは Windows の制限により操作できません。管理する必要がある場合は ObjectFrame も管理者として起動してください。
 - **ワークスペース数** の変更は再起動後に反映されます。
-- **角丸**: Windows が描くウィンドウ自体の角は 0 / 4 / 8px のいずれかです。それ以外の半径は枠の描画で表現します。
+- **角丸**: Windows が描くウィンドウ自体の角は 0 / 4 / 8px のいずれかです。直角のウィンドウ（角を丸めない指定、枠のないウィンドウ）には直角の枠を付け、角の上には描きません。最大化したウィンドウには枠を出しません。`border_width = 0` のときは 0 / 4 / 8px のどれかになり、半径の上限はおよそ `8 + 2.4 × border_width` px です。

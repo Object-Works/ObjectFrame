@@ -32,7 +32,6 @@ bool KeyboardHook::Start(HWND target, UINT message) {
     thread_ = std::thread(&KeyboardHook::ThreadMain, this, ready);
     WaitForSingleObject(ready, 5000);
     CloseHandle(ready);
-    threadId_ = GetThreadId(thread_.native_handle());
     return hook_ != nullptr;
 }
 
@@ -48,7 +47,7 @@ void KeyboardHook::SetBinds(const std::vector<Bind>& binds, bool essentialOnly) 
     for (size_t i = 0; i < binds.size(); ++i) {
         if (essentialOnly) {
             auto verb = ToLower(binds[i].command.substr(0, binds[i].command.find(L' ')));
-            if (verb != L"pause" && verb != L"quit" && verb != L"exit" && verb != L"settings") continue;
+            if (verb != L"pause" && verb != L"quit" && verb != L"exit") continue;
         }
         entries.push_back({binds[i].mods, binds[i].vk, i});
     }
@@ -57,6 +56,7 @@ void KeyboardHook::SetBinds(const std::vector<Bind>& binds, bool essentialOnly) 
 }
 
 void KeyboardHook::ThreadMain(HANDLE ready) {
+    threadId_ = GetCurrentThreadId();
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
     hook_ = SetWindowsHookExW(WH_KEYBOARD_LL, Proc, GetModuleHandleW(nullptr), 0);
     SetEvent(ready);

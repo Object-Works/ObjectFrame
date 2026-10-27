@@ -64,7 +64,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     for (int i = 1; i < argc; ++i) {
         std::wstring a = argv[i];
         if (a == L"dispatch" || a == L"msg") return SendDispatch(argc, argv);
-        if (a == L"settings") return SendCommand(L"settings");
+        if (a == L"settings") {
+            PrintToParentConsole(
+                L"ObjectFrame has no settings window. Edit ofwm.conf, then run: ofwm dispatch reload");
+            return 0;
+        }
         if ((a == L"--config" || a == L"-c") && i + 1 < argc) configPath = argv[++i];
         else if (a == L"--version" || a == L"-v") {
             PrintToParentConsole(L"ObjectFrame " OFWM_VERSION_WSTRING);
@@ -73,8 +77,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             PrintToParentConsole(
                 L"ObjectFrame " OFWM_VERSION_WSTRING L" - tiling window manager for Windows\n"
                 L"  ofwm [--config <path>]          start the window manager\n"
-                L"  ofwm settings                   open the settings window of the running instance\n"
                 L"  ofwm dispatch <command> [args]  send a command to the running instance\n"
+                L"                                  edit ofwm.conf, then: ofwm dispatch reload\n"
                 L"  ofwm --version                  print the version");
             return 0;
         }

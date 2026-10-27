@@ -1,6 +1,6 @@
 ; Inno Setup script for ObjectFrame.
 ; Built by .github/workflows/build.yml:
-;   iscc /DAppVersion=0.1.0 /DBuildDir=..\build\Release installer\ObjectFrame.iss
+;   iscc /DAppVersion=0.1.1 /DBuildDir=..\build\Release installer\ObjectFrame.iss
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
@@ -50,8 +50,6 @@ japanese.AutostartTask=Windows へのサインイン時に ObjectFrame を起動
 english.AutostartTask=Start ObjectFrame when I sign in to Windows
 japanese.LaunchApp=ObjectFrame を起動する
 english.LaunchApp=Launch ObjectFrame
-japanese.SettingsShortcut=ObjectFrame 設定
-english.SettingsShortcut=ObjectFrame Settings
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -63,11 +61,10 @@ Source: "..\docs\README.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
-Name: "{autoprograms}\{cm:SettingsShortcut}"; Filename: "{app}\{#AppExe}"; Parameters: "settings"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 [Registry]
-; Same value the settings window's autostart checkbox writes.
+; Autostart is this installer task. There is no settings window.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "ObjectFrame"; \
   ValueData: """{app}\{#AppExe}"""; Tasks: autostart
 

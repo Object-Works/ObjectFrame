@@ -179,6 +179,17 @@ void SetCornerPreference(HWND hwnd, int preference) {
     DwmSetWindowAttribute(hwnd, kDwmCornerPreference, &preference, sizeof(preference));
 }
 
+bool WindowHasSquareCorners(HWND hwnd) {
+    if (!IsWindow(hwnd) || IsZoomed(hwnd)) return true;
+    const LONG style = GetWindowLongW(hwnd, GWL_STYLE);
+    if (style & WS_CHILD) return true;
+    // DWM only rounds a top-level frame. A borderless popup stays square.
+    if ((style & (WS_CAPTION | WS_THICKFRAME | WS_DLGFRAME | WS_BORDER)) == 0) return true;
+    int pref = 0;
+    if (SUCCEEDED(DwmGetWindowAttribute(hwnd, kDwmCornerPreference, &pref, sizeof(pref))) && pref == 1) return true;
+    return false;
+}
+
 UINT GetMonitorDpi(HMONITOR monitor) {
     UINT x = 96, y = 96;
     if (FAILED(GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &x, &y))) return 96;

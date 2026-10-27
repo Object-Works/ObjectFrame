@@ -68,16 +68,8 @@ bool EnsureConfigFile(const std::wstring& path);
 
 bool LoadConfigText(const std::wstring& text, Config& out, std::vector<std::wstring>& warnings);
 bool LoadConfigFile(const std::wstring& path, Config& out, std::vector<std::wstring>& warnings);
-std::wstring SerializeConfig(const Config& config);
-bool SaveConfigFile(const std::wstring& path, const Config& config);
 
 bool ParseModifiers(std::wstring s, UINT& mods);
 bool ParseKey(const std::wstring& s, UINT& vk);
-std::wstring ModsToString(UINT mods);  // "SUPER SHIFT"
-std::wstring KeyToString(UINT vk);     // "H", "RETURN", "F5"
-std::vector<std::wstring> AllKeyNames();
-const wchar_t* RuleActionName(WindowRule::Action action);
-const wchar_t* RuleFieldName(WindowRule::Field field);
-bool MakeWindowRule(WindowRule::Action action, WindowRule::Field field, const std::wstring& pattern, WindowRule& out);
 
 }  // namespace of

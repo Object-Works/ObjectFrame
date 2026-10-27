@@ -116,7 +116,6 @@ private:
     void Exec(const std::wstring& command);
     void Reload();
     void TogglePause();
-    void OpenSettings();
     void Quit();
 
     // Helpers
@@ -140,6 +139,14 @@ private:
     void AddTrayIcon();
     void RemoveTrayIcon();
     void UpdateTrayTip();
+    // Refreshes everything that displays the current workspace/layout/focus (tray tip, ObjectPulse).
+    void OnStateChanged();
+
+    // ObjectPulse
+    void RequestPulseUpdate(const wchar_t* event = nullptr);
+    void PublishPulse();
+    std::wstring PulseState() const;
+    void SendPulse(const std::wstring& text);
     void ShowTrayMenu();
     void Notify(const std::wstring& title, const std::wstring& text);
     std::wstring HiddenListPath() const;
@@ -174,6 +181,10 @@ private:
     bool selfElevated_ = false;
     bool shutdown_ = false;
     NOTIFYICONDATAW nid_{};
+    // Last state sent to ObjectPulse, and a one-off event ("reload") to send with the next one.
+    std::wstring pulseState_;
+    std::wstring pulseEvent_;
+    bool pulsePending_ = false;
 };
 
 }  // namespace of

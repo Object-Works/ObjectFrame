@@ -38,6 +38,8 @@ void ResetBorderColor(HWND hwnd);
 
 // DWMWCP_* value: 0 default, 1 square, 2 round, 3 small round.
 void SetCornerPreference(HWND hwnd, int preference);
+// True when DWM will not round this window, so a rounded frame would paint over its corners.
+bool WindowHasSquareCorners(HWND hwnd);
 // Show/hide/minimize animations drawn by DWM.
 void SetDwmTransitions(HWND hwnd, bool enabled);
 UINT GetMonitorDpi(HMONITOR monitor);

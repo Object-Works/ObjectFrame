@@ -92,16 +92,18 @@ void RenderBorder(uint32_t* pixels, const RECT& region, int winW, int winH, cons
         uint32_t* row = pixels + (size_t)(y - region.top) * rw;
         for (int x = region.left; x < region.right; ++x) {
             double fx = x + 0.5, fy = y + 0.5;
-            double d = RoundedRectDistance(fx, fy, win, radius) - s.width;
-            // Everything the window itself covers stays transparent, so translucent (Mica/acrylic)
-            // windows aren't tinted; where the window's corner is rounder than the border's,
-            // the border fills the gap.
-            double uncovered = 1.0 - Clamp01(0.5 - RoundedRectDistance(fx, fy, win, s.windowRadius));
-            double ring = s.width > 0 ? Clamp01(0.5 - d) * uncovered : 0.0;
+            double inner = RoundedRectDistance(fx, fy, win, radius);
+            double d = inner - s.width;
+            // The decoration sits above the window, so the window only shows through inside the
+            // rounded rect: the border covers the window's own (squarer) corners, making the window
+            // look as round as the border. Inside it everything stays transparent, so translucent
+            // (Mica/acrylic) windows aren't tinted.
+            double outside = Clamp01(0.5 + inner);
+            double ring = s.width > 0 ? Clamp01(0.5 - d) * outside : 0.0;
             double gl = 0.0;
             if (glow) {
                 double t = Clamp01(d / s.glowSize);
-                gl = glowAlpha * (1.0 - t * t * (3.0 - 2.0 * t)) * uncovered;
+                gl = glowAlpha * (1.0 - t * t * (3.0 - 2.0 * t)) * outside;
             }
             double a = ring + gl * (1.0 - ring);
             if (a <= 0.0) {
@@ -155,6 +157,7 @@ void BorderOverlay::Show(HWND target, const BorderStyle& logicalStyle) {
     };
     bool rerender = !rendered_ || !(s == lastStyle_) || winW != Width(lastRect_) || winH != Height(lastRect_);
     POINT origin{vr.left - margin, vr.top - margin};
+    HWND insertAfter = InsertAfterFor(target);
 
     for (int i = 0; i < 4; ++i) {
         const RECT& rg = regions[i];
@@ -163,14 +166,36 @@ void BorderOverlay::Show(HWND target, const BorderStyle& logicalStyle) {
             continue;
         }
         if (rerender) RenderStrip(i, rg, origin, winW, winH, s);
-        // Inserting after the target puts the strip directly beneath it in z-order.
-        SetWindowPos(strips_[i], target, origin.x + rg.left, origin.y + rg.top, 0, 0,
+        SetWindowPos(strips_[i], insertAfter, origin.x + rg.left, origin.y + rg.top, 0, 0,
                      SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
     }
     lastRect_ = vr;
     lastStyle_ = s;
     rendered_ = true;
     visible_ = true;
+}
+
+bool BorderOverlay::IsStrip(HWND hwnd) const {
+    return std::find(std::begin(strips_), std::end(strips_), hwnd) != std::end(strips_);
+}
+
+HWND BorderOverlay::InsertAfterFor(HWND target) {
+    // The strips go directly above the target, i.e. beneath whatever is above it.
+    HWND above = GetWindow(target, GW_HWNDPREV);
+    while (above && IsStrip(above)) above = GetWindow(above, GW_HWNDPREV);
+    auto topmost = [](HWND h) { return (GetWindowLongPtrW(h, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0; };
+    bool targetTopmost = topmost(target);
+    if (!targetTopmost) {
+        // Inserting beneath a topmost window would make the strips topmost too.
+        for (HWND strip : strips_) {
+            if (topmost(strip)) {
+                SetWindowPos(strip, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
+        }
+        if (!above || topmost(above)) return HWND_TOP;
+        return above;
+    }
+    return above ? above : HWND_TOPMOST;
 }
 
 void BorderOverlay::RenderStrip(int index, const RECT& region, POINT origin, int winW, int winH,

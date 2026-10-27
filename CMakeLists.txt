@@ -15,7 +15,6 @@ add_executable(ofwm WIN32
     src/window_utils.cpp
     src/window_manager.cpp
     src/keyboard_hook.cpp
-    src/settings_window.cpp
     src/border_overlay.cpp
     src/animator.cpp
     src/app.manifest
@@ -30,4 +29,4 @@ if(MSVC)
     set_property(TARGET ofwm PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
-target_link_libraries(ofwm PRIVATE dwmapi shell32 user32 advapi32 comctl32 comdlg32 uxtheme shcore winmm gdiplus)
+target_link_libraries(ofwm PRIVATE dwmapi shell32 user32 advapi32 shcore winmm gdiplus)

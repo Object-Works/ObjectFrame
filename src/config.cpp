@@ -4,7 +4,6 @@
 #include <cwctype>
 #include <filesystem>
 #include <fstream>
-#include <sstream>
 #include <utility>
 
 namespace of {
@@ -57,11 +56,6 @@ const std::pair<const wchar_t*, UINT> kNamedKeys[] = {
     {L"grave", VK_OEM_3},       {L"bracketleft", VK_OEM_4},  {L"backslash", VK_OEM_5},
     {L"bracketright", VK_OEM_6}, {L"apostrophe", VK_OEM_7},  {L"print", VK_SNAPSHOT},
 };
-
-std::wstring ToUpper(std::wstring s) {
-    for (auto& c : s) c = (wchar_t)towupper(c);
-    return s;
-}
 
 bool ParseBind(const std::wstring& value, Bind& b, std::wstring& err) {
     size_t c1 = value.find(L',');
@@ -205,73 +199,6 @@ bool ParseKey(const std::wstring& s, UINT& vk) {
         }
     }
     return false;
-}
-
-std::wstring ModsToString(UINT mods) {
-    std::wstring s;
-    auto add = [&](const wchar_t* name) {
-        if (!s.empty()) s += L' ';
-        s += name;
-    };
-    if (mods & MOD_WIN) add(L"SUPER");
-    if (mods & MOD_ALT) add(L"ALT");
-    if (mods & MOD_CONTROL) add(L"CTRL");
-    if (mods & MOD_SHIFT) add(L"SHIFT");
-    return s;
-}
-
-std::wstring KeyToString(UINT vk) {
-    if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9')) return std::wstring(1, (wchar_t)vk);
-    if (vk >= VK_F1 && vk <= VK_F24) return L"F" + std::to_wstring(vk - VK_F1 + 1);
-    for (auto& [name, code] : kNamedKeys) {
-        if (code == vk) return ToUpper(name);
-    }
-    return L"";
-}
-
-std::vector<std::wstring> AllKeyNames() {
-    std::vector<std::wstring> names;
-    for (wchar_t c = L'A'; c <= L'Z'; ++c) names.emplace_back(1, c);
-    for (wchar_t c = L'0'; c <= L'9'; ++c) names.emplace_back(1, c);
-    std::vector<UINT> seen;
-    for (auto& [name, code] : kNamedKeys) {
-        if (std::find(seen.begin(), seen.end(), code) != seen.end()) continue;
-        seen.push_back(code);
-        names.push_back(ToUpper(name));
-    }
-    for (int i = 1; i <= 24; ++i) names.push_back(L"F" + std::to_wstring(i));
-    return names;
-}
-
-const wchar_t* RuleActionName(WindowRule::Action action) {
-    switch (action) {
-        case WindowRule::Action::Float: return L"float";
-        case WindowRule::Action::Ignore: return L"ignore";
-        case WindowRule::Action::Tile: return L"tile";
-    }
-    return L"float";
-}
-
-const wchar_t* RuleFieldName(WindowRule::Field field) {
-    switch (field) {
-        case WindowRule::Field::Class: return L"class";
-        case WindowRule::Field::Exe: return L"exe";
-        case WindowRule::Field::Title: return L"title";
-    }
-    return L"class";
-}
-
-bool MakeWindowRule(WindowRule::Action action, WindowRule::Field field, const std::wstring& pattern,
-                    WindowRule& out) {
-    try {
-        out.re = std::wregex(pattern, std::regex::ECMAScript | std::regex::icase);
-    } catch (const std::regex_error&) {
-        return false;
-    }
-    out.action = action;
-    out.field = field;
-    out.pattern = pattern;
-    return true;
 }
 
 bool ParseLayout(const std::wstring& s, LayoutKind& out) {
@@ -442,86 +369,10 @@ bool LoadConfigFile(const std::wstring& path, Config& out, std::vector<std::wstr
     return LoadConfigText(Utf8ToWide(bytes), out, warnings);
 }
 
-std::wstring SerializeConfig(const Config& c) {
-    auto color = [](COLORREF v) {
-        wchar_t buf[16];
-        swprintf_s(buf, L"0x%02x%02x%02x", GetRValue(v), GetGValue(v), GetBValue(v));
-        return std::wstring(buf);
-    };
-    auto ratio = [](double v) {
-        wchar_t buf[16];
-        swprintf_s(buf, L"%.2f", v);
-        return std::wstring(buf);
-    };
-    auto modsText = [&](UINT mods) {
-        if (c.mainMod && (mods & c.mainMod) == c.mainMod) {
-            std::wstring rest = ModsToString(mods & ~c.mainMod);
-            return rest.empty() ? std::wstring(L"$mod") : L"$mod " + rest;
-        }
-        return ModsToString(mods);
-    };
-
-    std::wostringstream o;
-    o << L"# ObjectFrame WM 設定ファイル (設定画面から保存されました)\n"
-         L"# 書式: key = value     '#' 以降はコメント (行頭 or 空白の直後のみ)\n\n";
-    o << L"$mod = " << ModsToString(c.mainMod) << L"\n\n";
-    o << L"gaps_in = " << c.gapsIn << L"\n";
-    o << L"gaps_out = " << c.gapsOut << L"\n";
-    o << L"border = " << (c.borders ? L"true" : L"false") << L"\n";
-    o << L"border_width = " << c.borderWidth << L"\n";
-    o << L"border_radius = " << c.borderRadius << L"\n";
-    o << L"border_active = " << color(c.borderActive) << L"\n";
-    o << L"border_inactive = " << color(c.borderInactive) << L"\n";
-    o << L"glow = " << (c.glow ? L"true" : L"false") << L"\n";
-    o << L"glow_size = " << c.glowSize << L"\n";
-    o << L"glow_intensity = " << c.glowIntensity << L"\n";
-    o << L"animate_move = " << (c.animateMove ? L"true" : L"false") << L"\n";
-    o << L"animate_workspace = " << (c.animateWorkspace ? L"true" : L"false") << L"\n";
-    o << L"animation_duration = " << c.animationDuration << L"\n";
-    o << L"workspace_slide = " << SlideDirectionName(c.workspaceSlide) << L"\n";
-    o << L"workspace_mode = " << (c.linkedWorkspaces ? L"linked" : L"independent") << L"\n";
-    o << L"column_width = " << ratio(c.niriColumnWidth) << L"\n";
-    o << L"default_layout = " << LayoutName(c.defaultLayout) << L"\n";
-    o << L"master_ratio = " << ratio(c.masterRatio) << L"\n";
-    o << L"dwindle_ratio = " << ratio(c.dwindleRatio) << L"\n";
-    o << L"workspaces = " << c.workspaceCount << L"\n";
-    o << L"cursor_follows_focus = " << (c.cursorFollowsFocus ? L"true" : L"false") << L"\n";
-    o << L"focus_follows_mouse = " << (c.focusFollowsMouse ? L"true" : L"false") << L"\n\n";
-
-    for (auto& cmd : c.execOnce) o << L"exec-once = " << cmd << L"\n";
-    if (!c.execOnce.empty()) o << L"\n";
-
-    for (auto& r : c.rules) {
-        o << L"windowrule = " << RuleActionName(r.action) << L", " << RuleFieldName(r.field) << L":" << r.pattern
-          << L"\n";
-    }
-    if (!c.rules.empty()) o << L"\n";
-
-    for (auto& b : c.binds) {
-        size_t sp = b.command.find(L' ');
-        std::wstring verb = b.command.substr(0, sp);
-        o << L"bind = " << modsText(b.mods) << L", " << KeyToString(b.vk) << L", " << verb;
-        if (sp != std::wstring::npos) o << L", " << Trim(b.command.substr(sp + 1));
-        o << L"\n";
-    }
-    return o.str();
-}
-
-bool SaveConfigFile(const std::wstring& path, const Config& config) {
-    std::error_code ec;
-    std::filesystem::path p(path);
-    std::filesystem::create_directories(p.parent_path(), ec);
-    std::ofstream out(p, std::ios::binary | std::ios::trunc);
-    if (!out) return false;
-    out << WideToUtf8(SerializeConfig(config));
-    return (bool)out;
-}
-
 std::wstring DefaultConfigText() {
     return LR"CFG(# ObjectFrame WM 設定ファイル
 # 書式: key = value     '#' 以降はコメント (行頭 or 空白の直後のみ)
-# 設定画面 ($mod + F1 / トレイアイコンをダブルクリック) からも編集できます。
-# 手で編集した場合は $mod SHIFT + R で再読み込みできます。
+# 編集したら $mod SHIFT + R、または ofwm dispatch reload で再読み込みできます。
 
 # SUPER = Windows キー。Win+L は OS のロック画面に予約されているため割り当てできません。
 $mod = SUPER
@@ -531,7 +382,7 @@ gaps_in = 8               # ウィンドウ同士の隙間 (px)
 gaps_out = 12             # 画面端との隙間 (px)
 border = true             # フォーカス枠を表示
 border_width = 2          # 枠の太さ (px)。0 = Windows 11 標準の 1px 枠に色を付けるだけ
-border_radius = 8         # 角丸の半径 (px, 0-30)。ウィンドウ自体の角は 0 / 4 / 8 の近いものに揃えます
+border_radius = 8         # 角丸の半径 (px, 0-30)。枠を描くとウィンドウの角もこの半径で丸く見えます
 border_active = 0x89b4fa
 border_inactive = 0x313244
 
@@ -579,7 +430,6 @@ windowrule = float, class:^OperationStatusWindow$
 
 bind = $mod, RETURN, exec, wt.exe
 bind = $mod, Q, close
-bind = $mod, F1, settings
 
 bind = $mod, LEFT, focus, left
 bind = $mod, DOWN, focus, down

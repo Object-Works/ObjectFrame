@@ -33,8 +33,9 @@ BorderStyle MakeBorderStyle(const Config& config, bool active);
 // overlay coordinates where the window occupies [margin, margin, margin+winW, margin+winH].
 void RenderBorder(uint32_t* pixels, const RECT& region, int winW, int winH, const BorderStyle& style);
 
-// Click-through layered windows drawn directly beneath a target window. The decoration is
-// split into four strips so large windows don't need a full-size bitmap.
+// Click-through layered windows drawn directly above a target window, so they can round off the
+// window's corners. The decoration is split into four strips so large windows don't need a
+// full-size bitmap.
 class BorderOverlay {
 public:
     BorderOverlay();
@@ -46,6 +47,8 @@ public:
     void Hide();
 
 private:
+    bool IsStrip(HWND hwnd) const;
+    HWND InsertAfterFor(HWND target);
     void RenderStrip(int index, const RECT& region, POINT origin, int winW, int winH, const BorderStyle& style);
 
     HWND strips_[4] = {};

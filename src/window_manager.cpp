@@ -2,7 +2,6 @@
 
 #include "layout.h"
 #include "resource.h"
-#include "settings_window.h"
 #include "window_utils.h"
 
 #include <algorithm>
@@ -21,13 +20,14 @@ constexpr UINT WM_APP_HOTKEY = WM_APP + 4;
 constexpr UINT_PTR kDisplayTimer = 1;
 constexpr UINT_PTR kAnimationTimer = 2;
 constexpr UINT_PTR kHoverTimer = 3;
+constexpr UINT_PTR kPulseTimer = 4;
 constexpr UINT kHoverPollMs = 30;
+constexpr UINT kPulseDelayMs = 40;  // coalesces bursts of changes (e.g. title updates) into one message
 constexpr ULONGLONG kHoverDelayMs = 60;  // how long the cursor must rest on a window before it's focused
 constexpr ULONGLONG kFocusSuppressMs = 400;
 
 enum TrayCommand : UINT {
-    kTraySettings = 100,
-    kTrayPause,
+    kTrayPause = 100,
     kTrayRetile,
     kTrayReload,
     kTrayEditConfig,
@@ -68,6 +68,10 @@ bool WindowManager::Init(HINSTANCE instance, const std::wstring& configPath) {
     wc.lpfnWndProc = WndProc;
     wc.hInstance = instance;
     wc.lpszClassName = kWindowClass;
+    wc.hIcon = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(IDI_OFWM), IMAGE_ICON,
+                                             GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_SHARED));
+    wc.hIconSm = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(IDI_OFWM), IMAGE_ICON,
+                                               GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_SHARED));
     if (!RegisterClassExW(&wc)) return false;
     hwnd_ = CreateWindowExW(WS_EX_TOOLWINDOW, kWindowClass, L"ObjectFrame", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr,
                             instance, nullptr);
@@ -132,7 +136,7 @@ bool WindowManager::Init(HINSTANCE instance, const std::wstring& configPath) {
     UpdateFocusBorder(fg);
 
     for (auto& cmd : config_.execOnce) Exec(cmd);
-    UpdateTrayTip();
+    OnStateChanged();
 
     Log(L"ObjectFrame started: %zu monitor(s), %zu window(s), elevated=%d", monitors_.size(), windows_.size(),
         selfElevated_ ? 1 : 0);
@@ -145,8 +149,6 @@ bool WindowManager::Init(HINSTANCE instance, const std::wstring& configPath) {
 int WindowManager::Run() {
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
-        HWND settings = SettingsWindow::Handle();
-        if (settings && IsDialogMessageW(settings, &msg)) continue;
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
@@ -160,9 +162,9 @@ void WindowManager::Shutdown() {
     for (auto h : hooks_) UnhookWinEvent(h);
     hooks_.clear();
     keyboard_.Stop();
-    SettingsWindow::Close();
     overlays_.clear();
     RestoreAllWindows();
+    SendPulse(L"of=0\n");
     RemoveTrayIcon();
     std::error_code ec;
     std::filesystem::remove(HiddenListPath(), ec);
@@ -231,7 +233,10 @@ LRESULT CALLBACK WindowManager::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
 
         case WM_APP_TRAY:
             if (LOWORD(lp) == WM_RBUTTONUP || LOWORD(lp) == WM_CONTEXTMENU) self->ShowTrayMenu();
-            else if (LOWORD(lp) == WM_LBUTTONDBLCLK) self->OpenSettings();
+            else if (LOWORD(lp) == WM_LBUTTONDBLCLK) {
+                ShellExecuteW(nullptr, L"open", L"notepad.exe", (L"\"" + self->configPath_ + L"\"").c_str(), nullptr,
+                              SW_SHOWNORMAL);
+            }
             return 0;
 
         case WM_DISPLAYCHANGE:
@@ -247,6 +252,8 @@ LRESULT CALLBACK WindowManager::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
                 self->animator_.Tick();
             } else if (wp == kHoverTimer) {
                 self->OnHoverTick();
+            } else if (wp == kPulseTimer) {
+                self->PublishPulse();
             } else if (wp == kDisplayTimer) {
                 KillTimer(hwnd, kDisplayTimer);
                 self->OnDisplayChange();
@@ -303,6 +310,7 @@ void WindowManager::OnWinEvent(DWORD event, HWND h) {
         case EVENT_SYSTEM_MINIMIZEEND:
         case EVENT_OBJECT_NAMECHANGE:
             if (!IsManaged(h)) TryManage(h, true);
+            if (event == EVENT_OBJECT_NAMECHANGE && h == GetForegroundWindow()) RequestPulseUpdate();
             break;
 
         case EVENT_OBJECT_HIDE:
@@ -377,7 +385,7 @@ void WindowManager::OnForeground(HWND h) {
         if (m >= 0) focusedMonitor_ = m;
     }
     UpdateFocusBorder(h);
-    UpdateTrayTip();
+    OnStateChanged();
 }
 
 void WindowManager::OnMoveSizeEnd(HWND h) {
@@ -746,7 +754,7 @@ void WindowManager::SyncOverlay(HWND h) {
         const Monitor& mon = monitors_[info.monitor];
         const Workspace& ws = mon.workspaces[info.workspace];
         // Clipped windows are partly off their monitor, and the glow would show on the neighbour.
-        show = info.workspace == mon.active && ws.fullscreen != h && !animator_.IsClipped(h) &&
+        show = info.workspace == mon.active && ws.fullscreen != h && !IsZoomed(h) && !animator_.IsClipped(h) &&
                // In monocle only the top window's decoration is visible anyway.
                !(ws.layout == LayoutKind::Monocle && !info.floating && ws.lastFocused && ws.lastFocused != h);
     }
@@ -757,7 +765,10 @@ void WindowManager::SyncOverlay(HWND h) {
         return;
     }
     if (overlay == overlays_.end()) overlay = overlays_.emplace(h, std::make_unique<BorderOverlay>()).first;
-    overlay->second->Show(h, MakeBorderStyle(config_, h == activeBorder_));
+    BorderStyle style = MakeBorderStyle(config_, h == activeBorder_);
+    // A rounded frame painted on a square window covers its corners. Follow the square edge instead.
+    if (WindowHasSquareCorners(h)) style.radius = style.windowRadius = 0;
+    overlay->second->Show(h, style);
 }
 
 void WindowManager::SyncAllOverlays() {
@@ -780,7 +791,15 @@ void WindowManager::Dispatch(const std::wstring& line) {
     if (verb == L"quit" || verb == L"exit") return Quit();
     if (verb == L"reload") return Reload();
     if (verb == L"exec") return Exec(arg);
-    if (verb == L"settings") return OpenSettings();
+    if (verb == L"settings") {
+        Log(L"settings: there is no settings window; edit the config file and dispatch reload");
+        return;
+    }
+    if (verb == L"pulse") {
+        // Sent by ObjectPulse when it starts: resend the full state even if it didn't change.
+        pulseState_.clear();
+        return PublishPulse();
+    }
     if (paused_) return;
 
     Direction dir;
@@ -838,7 +857,7 @@ void WindowManager::Dispatch(const std::wstring& line) {
     } else {
         Log(L"unknown command: %s", s.c_str());
     }
-    UpdateTrayTip();
+    OnStateChanged();
 }
 
 HWND WindowManager::CurrentWindow() {
@@ -1172,7 +1191,7 @@ void WindowManager::SwitchWorkspace(int m, int index) {
     for (HWND h : oldWs.floating) leave(h);
 
     SaveHiddenList();
-    UpdateTrayTip();
+    OnStateChanged();
 }
 
 // ---------------------------------------------------------------------------
@@ -1321,7 +1340,7 @@ void WindowManager::LinkedSwitch(int anchor, int k) {
     }
 
     SaveHiddenList();
-    UpdateTrayTip();
+    OnStateChanged();
 }
 
 void WindowManager::MoveToWorkspace(int index, bool follow) {
@@ -1534,6 +1553,7 @@ void WindowManager::Reload() {
     ApplyAllBorders();
     if (LinkedActive() && !wasLinked) NormalizeLinked();
     RetileAll();
+    RequestPulseUpdate(L"reload");
     Notify(L"ObjectFrame", warnings.empty() ? L"Config reloaded"
                                             : L"Config reloaded with " + std::to_wstring(warnings.size()) +
                                                   L" warning(s). See ofwm.log.");
@@ -1545,12 +1565,8 @@ void WindowManager::TogglePause() {
     ApplyHotkeys();
     if (paused_) SyncAllOverlays();
     else Rescan();
-    UpdateTrayTip();
+    OnStateChanged();
     Notify(L"ObjectFrame", paused_ ? L"Paused" : L"Resumed");
-}
-
-void WindowManager::OpenSettings() {
-    SettingsWindow::Open(instance_, configPath_, [this] { Reload(); });
 }
 
 // ---------------------------------------------------------------------------
@@ -1652,7 +1668,7 @@ void WindowManager::OnDisplayChange() {
     NormalizeLinked();
     RetileAll();
     SaveHiddenList();
-    UpdateTrayTip();
+    OnStateChanged();
 }
 
 // ---------------------------------------------------------------------------
@@ -1689,6 +1705,118 @@ void WindowManager::UpdateTrayTip() {
     Shell_NotifyIconW(NIM_MODIFY, &nid_);
 }
 
+void WindowManager::OnStateChanged() {
+    UpdateTrayTip();
+    RequestPulseUpdate();
+}
+
+// ---------------------------------------------------------------------------
+// ObjectPulse
+// ---------------------------------------------------------------------------
+
+void WindowManager::RequestPulseUpdate(const wchar_t* event) {
+    if (event) pulseEvent_ = event;
+    if (pulsePending_ || !hwnd_) return;
+    pulsePending_ = true;
+    SetTimer(hwnd_, kPulseTimer, kPulseDelayMs, nullptr);
+}
+
+void WindowManager::PublishPulse() {
+    KillTimer(hwnd_, kPulseTimer);
+    pulsePending_ = false;
+    if (shutdown_ || !FindWindowW(kPulseWindowClass, nullptr)) {
+        pulseState_.clear();
+        pulseEvent_.clear();
+        return;
+    }
+    std::wstring state = PulseState();
+    if (state == pulseState_ && pulseEvent_.empty()) return;
+    pulseState_ = state;
+    if (!pulseEvent_.empty()) state += L"event=" + pulseEvent_ + L"\n";
+    pulseEvent_.clear();
+    SendPulse(state);
+}
+
+std::wstring WindowManager::PulseState() const {
+    if (monitors_.empty()) return L"of=1\n";
+    const int fm = std::clamp(focusedMonitor_, 0, (int)monitors_.size() - 1);
+    const Monitor& mon = monitors_[fm];
+    const Workspace& ws = mon.workspaces[mon.active];
+    const bool linked = LinkedActive();
+
+    // Linked workspaces span all monitors; independent ones belong to the focused monitor.
+    std::wstring occupied, visible;
+    for (int k = 0; k < (int)mon.workspaces.size(); ++k) {
+        bool used = false, shown = false;
+        for (int m = 0; m < (int)monitors_.size(); ++m) {
+            if (!linked && m != fm) continue;
+            const Workspace& w = monitors_[m].workspaces[k];
+            used |= !w.tiled.empty() || !w.floating.empty();
+            shown |= monitors_[m].active == k;
+        }
+        auto add = [k](std::wstring& list) { list += (list.empty() ? L"" : L",") + std::to_wstring(k + 1); };
+        if (used) add(occupied);
+        if (shown) add(visible);
+    }
+
+    HWND fg = GetForegroundWindow();
+    bool app = fg && fg != hwnd_ && !IsShellWindowClass(GetWindowClass(fg));
+    auto info = windows_.find(fg);
+    std::wstring title, exe;
+    if (app) {
+        title = GetWindowTitle(fg);
+        std::replace(title.begin(), title.end(), L'\n', L' ');
+        std::replace(title.begin(), title.end(), L'\r', L' ');
+        DWORD pid = 0;
+        GetWindowThreadProcessId(fg, &pid);
+        exe = GetProcessExeName(pid);
+    }
+
+    wchar_t accent[16];
+    swprintf_s(accent, L"0x%02X%02X%02X", GetRValue(config_.borderActive), GetGValue(config_.borderActive),
+               GetBValue(config_.borderActive));
+
+    std::wstring s = L"of=1\n";
+    s += L"monitor=" + std::to_wstring(fm + 1) + L"\n";
+    s += L"monitors=" + std::to_wstring(monitors_.size()) + L"\n";
+    s += L"workspace=" + std::to_wstring(mon.active + 1) + L"\n";
+    s += L"workspaces=" + std::to_wstring(mon.workspaces.size()) + L"\n";
+    s += L"occupied=" + occupied + L"\n";
+    s += L"visible=" + visible + L"\n";
+    s += L"layout=" + std::wstring(LayoutName(ws.layout)) + L"\n";
+    // What every monitor shows, in monitor order, for displays that sit on each monitor.
+    std::wstring monitorWorkspaces, monitorLayouts;
+    for (const Monitor& m : monitors_) {
+        const wchar_t* sep = monitorWorkspaces.empty() ? L"" : L",";
+        monitorWorkspaces += sep + std::to_wstring(m.active + 1);
+        monitorLayouts += sep + std::wstring(LayoutName(m.workspaces[m.active].layout));
+    }
+    s += L"monitor_workspaces=" + monitorWorkspaces + L"\n";
+    s += L"monitor_layouts=" + monitorLayouts + L"\n";
+    s += L"windows=" + std::to_wstring(ws.tiled.size() + ws.floating.size()) + L"\n";
+    s += std::wstring(L"paused=") + (paused_ ? L"1" : L"0") + L"\n";
+    s += std::wstring(L"managed=") + (info != windows_.end() ? L"1" : L"0") + L"\n";
+    s += std::wstring(L"floating=") + (info != windows_.end() && info->second.floating ? L"1" : L"0") + L"\n";
+    s += std::wstring(L"fullscreen=") + (app && ws.fullscreen == fg ? L"1" : L"0") + L"\n";
+    s += L"hwnd=" + std::to_wstring(app ? (unsigned long long)(UINT_PTR)fg : 0ull) + L"\n";
+    s += L"exe=" + exe + L"\n";
+    s += L"title=" + title + L"\n";
+    s += std::wstring(L"accent=") + accent + L"\n";
+    return s;
+}
+
+void WindowManager::SendPulse(const std::wstring& text) {
+    HWND pulse = FindWindowW(kPulseWindowClass, nullptr);
+    if (!pulse) return;
+    COPYDATASTRUCT cds{};
+    cds.dwData = kPulseCopyDataMagic;
+    cds.cbData = (DWORD)((text.size() + 1) * sizeof(wchar_t));
+    cds.lpData = const_cast<wchar_t*>(text.c_str());
+    DWORD_PTR result = 0;
+    SendMessageTimeoutW(pulse, WM_COPYDATA, reinterpret_cast<WPARAM>(hwnd_), reinterpret_cast<LPARAM>(&cds),
+                        SMTO_ABORTIFHUNG, 200, &result);
+}
+
 void WindowManager::Notify(const std::wstring& title, const std::wstring& text) {
     if (!nid_.hWnd) return;
     NOTIFYICONDATAW n = nid_;
@@ -1701,8 +1829,6 @@ void WindowManager::Notify(const std::wstring& title, const std::wstring& text) 
 
 void WindowManager::ShowTrayMenu() {
     HMENU menu = CreatePopupMenu();
-    AppendMenuW(menu, MF_STRING | MF_DEFAULT, kTraySettings, L"設定... (Settings)");
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING | (paused_ ? MF_CHECKED : 0), kTrayPause, L"一時停止 (Pause)");
     AppendMenuW(menu, MF_STRING, kTrayRetile, L"再タイル (Retile)");
     AppendMenuW(menu, MF_STRING, kTrayReload, L"設定を再読み込み (Reload config)");
@@ -1720,7 +1846,6 @@ void WindowManager::ShowTrayMenu() {
 
     std::wstring logPath = std::filesystem::path(configPath_).parent_path().wstring() + L"\\ofwm.log";
     switch (cmd) {
-        case kTraySettings: OpenSettings(); break;
         case kTrayPause: TogglePause(); break;
         case kTrayRetile: Rescan(); break;
         case kTrayReload: Reload(); break;

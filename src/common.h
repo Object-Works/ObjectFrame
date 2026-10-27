@@ -15,6 +15,9 @@ namespace of {
 
 constexpr const wchar_t* kWindowClass = L"ObjectFrameWM";
 constexpr ULONG_PTR kCopyDataMagic = 0x4F46574D;  // 'OFWM'
+// ObjectPulse: receives the window manager's state as WM_COPYDATA "key=value\n" lines.
+constexpr const wchar_t* kPulseWindowClass = L"ObjectPulseWnd";
+constexpr ULONG_PTR kPulseCopyDataMagic = 0x4F46504C;  // 'OFPL'
 
 enum class Direction { Left, Right, Up, Down };
 
